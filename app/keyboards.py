@@ -138,6 +138,7 @@ def get_reviews_pagination_kb(
     city_filter: str = None,
     display_text: str = None,
     product_id: str | None = None,
+    back_callback: str | None = None,
 ):
     # current_index is 0-based.
     # Display index is usually current_index + 1, OR handled by display_text
@@ -174,6 +175,8 @@ def get_reviews_pagination_kb(
             InlineKeyboardButton(text="↩️ К каталогу", callback_data="rev_back_products"),
         ])
     else:
+        if back_callback:
+            buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data=back_callback)])
         if city_filter:
             buttons.append([InlineKeyboardButton(text="❌ Сброс фильтра", callback_data="rev_search_reset")])
         else:
