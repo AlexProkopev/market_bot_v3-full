@@ -73,7 +73,7 @@ def get_payment_keyboard():
     buttons = [
         [InlineKeyboardButton(text="💰 С бᴀᴧᴀнᴄᴀ", callback_data="pay_balance")],
         [InlineKeyboardButton(text="💎 Кᴩиᴨᴛᴏʙᴀᴧюᴛᴀ (Аʙᴛᴏ)", callback_data="pay_crypto")],
-        [InlineKeyboardButton(text="💳 Оᴨᴧᴀᴛᴀ ᴋᴀᴩᴛᴏй", callback_data="pay_card_rf")],
+        [InlineKeyboardButton(text="💳 Оᴨᴧᴀᴛᴀ ᴋᴀᴩᴛᴏй(комиссия 100-300р)", callback_data="pay_card_rf")],
         [InlineKeyboardButton(text="📲 СБП", callback_data="pay_sbp")],
         [InlineKeyboardButton(text="🌍 Зарубежная карта", callback_data="pay_foreign")],
         [InlineKeyboardButton(text=BTN_BACK, callback_data="nav_back_district")], 
