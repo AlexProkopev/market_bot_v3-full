@@ -311,7 +311,7 @@ async def _restore_after_all_city_reviews(send_method, state: FSMContext):
         population,
         header=f"📦 <b>Каталог для города {city_name}</b>",
     )
-    await send_method(catalog_text, reply_markup=ReplyKeyboardRemove())
+    await send_method(catalog_text, reply_markup=None)
     await state.set_state(OrderState.choosing_product)
 
 
@@ -1253,7 +1253,7 @@ async def _show_review_page(send_method, index, state):
                 InlineKeyboardButton(text="↩️ К каталогу", callback_data="rev_back_products"),
             ])
         elif all_city_mode:
-            buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="rev_back_from_all")])
+            buttons.append([InlineKeyboardButton(text="↩️ К каталогу", callback_data="rev_back_products")])
         else:
             buttons.append([InlineKeyboardButton(text="🔍 Поиск по городу", callback_data="rev_search_start")])
         buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="nav_cancel")])
@@ -1318,7 +1318,7 @@ async def _show_review_page(send_method, index, state):
         city_filter,
         display_text=display_str,
         product_id=product_id,
-        back_callback="rev_back_from_all" if all_city_mode and not product_id else None,
+        back_callback="rev_back_products" if all_city_mode and not product_id else None,
     )
     await send_method(text, reply_markup=review_markup)
     await state.set_state(ReviewState.browsing_reviews)
@@ -1348,14 +1348,6 @@ async def rev_back_products(callback: CallbackQuery, state: FSMContext):
     await _safe_answer_callback(callback)
     await _safe_edit_or_send(callback, catalog_text, reply_markup=None, state=state)
     await state.set_state(OrderState.choosing_product)
-
-@router.callback_query(F.data == 'rev_back_from_all')
-async def rev_back_from_all(callback: CallbackQuery, state: FSMContext):
-    await _safe_answer_callback(callback)
-    await _restore_after_all_city_reviews(
-        lambda text, reply_markup=None: _safe_edit_or_send(callback, text, reply_markup, state),
-        state,
-    )
 
 @router.callback_query(F.data.startswith('prod_review_'), OrderState.choosing_product)
 async def show_product_reviews(callback: CallbackQuery, state: FSMContext):

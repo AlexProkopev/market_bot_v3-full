@@ -26,15 +26,15 @@ def test_reviews_keyboard_shows_back_button_for_all_city_mode():
         current_index=0,
         total_count=5,
         city_filter="Томск",
-        back_callback="rev_back_from_all",
+        back_callback="rev_back_products",
     )
 
     buttons = [button for row in markup.inline_keyboard for button in row]
     callbacks = {button.callback_data for button in buttons}
     labels = {button.text for button in buttons}
 
-    assert "rev_back_from_all" in callbacks
-    assert "🔙 Назад" in labels
+    assert "rev_back_products" in callbacks
+    assert "↩️ К каталогу" in labels
     assert "rev_search_reset" not in callbacks
 
 
