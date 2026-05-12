@@ -177,7 +177,7 @@ def get_reviews_pagination_kb(
     else:
         if back_callback:
             buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data=back_callback)])
-        if city_filter:
+        elif city_filter:
             buttons.append([InlineKeyboardButton(text="❌ Сброс фильтра", callback_data="rev_search_reset")])
         else:
             buttons.append([InlineKeyboardButton(text="🔍 Поиск по городу", callback_data="rev_search_start")])

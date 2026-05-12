@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 
 from psycopg import connect
@@ -15,6 +16,8 @@ class PostgresDocumentStore:
 
     @staticmethod
     def is_enabled() -> bool:
+        if os.getenv("PYTEST_CURRENT_TEST") and os.getenv("ALLOW_TEST_DATABASE") != "1":
+            return False
         return bool(DATABASE_URL)
 
     @classmethod

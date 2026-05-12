@@ -35,7 +35,7 @@ def test_reviews_keyboard_shows_back_button_for_all_city_mode():
 
     assert "rev_back_from_all" in callbacks
     assert "🔙 Назад" in labels
-    assert "rev_search_reset" in callbacks
+    assert "rev_search_reset" not in callbacks
 
 
 def test_reviews_keyboard_keeps_product_actions():
@@ -79,7 +79,7 @@ def test_restore_after_all_city_reviews_returns_to_product_reviews():
     assert state.state is None
 
 
-def test_restore_after_all_city_reviews_returns_to_catalog_when_no_product_context():
+def test_restore_after_all_city_reviews_returns_to_city_reviews_when_no_product_context():
     state = DummyState(
         {
             "city": "Томск",
@@ -93,21 +93,46 @@ def test_restore_after_all_city_reviews_returns_to_catalog_when_no_product_conte
     )
     send_method = AsyncMock()
 
-    with patch.object(user_flow, "_build_catalog_text", AsyncMock(return_value="catalog")) as build_catalog_text:
+    with patch.object(user_flow, "_show_review_page", AsyncMock()) as show_review_page, patch.object(
+        user_flow,
+        "_build_catalog_text",
+        AsyncMock(return_value="catalog"),
+    ) as build_catalog_text:
         asyncio.run(user_flow._restore_after_all_city_reviews(send_method, state))
 
-    build_catalog_text.assert_awaited_once_with(
-        state,
-        "Томск",
-        120000,
-        header="📦 <b>Каталог для города Томск</b>",
-    )
-    send_method.assert_awaited_once()
-    args = send_method.await_args
-    assert args.args[0] == "catalog"
-    assert "reply_markup" in args.kwargs
-    assert state.data["rev_search_city"] is None
+    show_review_page.assert_awaited_once_with(send_method, 0, state)
+    build_catalog_text.assert_not_called()
+    assert state.data["rev_search_city"] == "Томск"
     assert state.data["rev_search_product"] is None
     assert state.data["rev_search_product_id"] is None
     assert state.data["rev_all_city_mode"] is False
-    assert state.state == OrderState.choosing_product
+    assert state.state is None
+
+
+def test_restore_after_all_city_reviews_returns_to_city_reviews_without_product_context():
+    state = DummyState(
+        {
+            "city": "Томск",
+            "population": 120000,
+            "rev_all_city_mode": True,
+            "rev_return_city": "Томск",
+            "rev_return_product": None,
+            "rev_return_product_id": None,
+            "rev_return_index": 3,
+        }
+    )
+    send_method = AsyncMock()
+
+    with patch.object(user_flow, "_show_review_page", AsyncMock()) as show_review_page, patch.object(
+        user_flow,
+        "_build_catalog_text",
+        AsyncMock(return_value="catalog"),
+    ) as build_catalog_text:
+        asyncio.run(user_flow._restore_after_all_city_reviews(send_method, state))
+
+    show_review_page.assert_awaited_once_with(send_method, 3, state)
+    build_catalog_text.assert_not_called()
+    assert state.data["rev_search_city"] == "Томск"
+    assert state.data["rev_search_product"] is None
+    assert state.data["rev_search_product_id"] is None
+    assert state.data["rev_all_city_mode"] is False
