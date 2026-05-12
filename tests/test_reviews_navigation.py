@@ -54,7 +54,21 @@ def test_reviews_keyboard_keeps_product_actions():
     assert "rev_back_from_all" not in callbacks
 
 
-def test_restore_after_all_city_reviews_returns_to_product_reviews():
+def test_reviews_keyboard_hides_reset_button_for_city_filter():
+    markup = get_reviews_pagination_kb(
+        current_index=0,
+        total_count=5,
+        city_filter="Томск",
+    )
+
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    callbacks = {button.callback_data for button in buttons}
+
+    assert "rev_search_reset" not in callbacks
+    assert "rev_search_start" not in callbacks
+
+
+def test_restore_after_all_city_reviews_returns_to_catalog():
     state = DummyState(
         {
             "city": "Томск",
@@ -68,48 +82,29 @@ def test_restore_after_all_city_reviews_returns_to_product_reviews():
     )
     send_method = AsyncMock()
 
-    with patch.object(user_flow, "_show_review_page", AsyncMock()) as show_review_page:
-        asyncio.run(user_flow._restore_after_all_city_reviews(send_method, state))
-
-    show_review_page.assert_awaited_once_with(send_method, 2, state)
-    assert state.data["rev_search_city"] == "Томск"
-    assert state.data["rev_search_product"] == "Альфа 1г"
-    assert state.data["rev_search_product_id"] == "p1"
-    assert state.data["rev_all_city_mode"] is False
-    assert state.state is None
-
-
-def test_restore_after_all_city_reviews_returns_to_city_reviews_when_no_product_context():
-    state = DummyState(
-        {
-            "city": "Томск",
-            "population": 120000,
-            "rev_all_city_mode": True,
-            "rev_return_city": "Томск",
-            "rev_return_product": None,
-            "rev_return_product_id": None,
-            "rev_return_index": 0,
-        }
-    )
-    send_method = AsyncMock()
-
-    with patch.object(user_flow, "_show_review_page", AsyncMock()) as show_review_page, patch.object(
+    with patch.object(user_flow, "_build_catalog_text", AsyncMock(return_value="catalog")) as build_catalog_text, patch.object(
         user_flow,
-        "_build_catalog_text",
-        AsyncMock(return_value="catalog"),
-    ) as build_catalog_text:
+        "_show_review_page",
+        AsyncMock(),
+    ) as show_review_page:
         asyncio.run(user_flow._restore_after_all_city_reviews(send_method, state))
 
-    show_review_page.assert_awaited_once_with(send_method, 0, state)
-    build_catalog_text.assert_not_called()
-    assert state.data["rev_search_city"] == "Томск"
+    build_catalog_text.assert_awaited_once_with(
+        state,
+        "Томск",
+        120000,
+        header="📦 <b>Каталог для города Томск</b>",
+    )
+    show_review_page.assert_not_called()
+    send_method.assert_awaited_once()
+    assert state.data["rev_search_city"] is None
     assert state.data["rev_search_product"] is None
     assert state.data["rev_search_product_id"] is None
     assert state.data["rev_all_city_mode"] is False
-    assert state.state is None
+    assert state.state == OrderState.choosing_product
 
 
-def test_restore_after_all_city_reviews_returns_to_city_reviews_without_product_context():
+def test_restore_after_all_city_reviews_returns_to_catalog_without_product_context():
     state = DummyState(
         {
             "city": "Томск",
@@ -130,9 +125,15 @@ def test_restore_after_all_city_reviews_returns_to_city_reviews_without_product_
     ) as build_catalog_text:
         asyncio.run(user_flow._restore_after_all_city_reviews(send_method, state))
 
-    show_review_page.assert_awaited_once_with(send_method, 3, state)
-    build_catalog_text.assert_not_called()
-    assert state.data["rev_search_city"] == "Томск"
+    build_catalog_text.assert_awaited_once_with(
+        state,
+        "Томск",
+        120000,
+        header="📦 <b>Каталог для города Томск</b>",
+    )
+    show_review_page.assert_not_called()
+    assert state.data["rev_search_city"] is None
     assert state.data["rev_search_product"] is None
     assert state.data["rev_search_product_id"] is None
     assert state.data["rev_all_city_mode"] is False
+    assert state.state == OrderState.choosing_product

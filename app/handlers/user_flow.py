@@ -293,10 +293,6 @@ async def _send_all_city_reviews(message: Message, state: FSMContext, city_name:
 
 async def _restore_after_all_city_reviews(send_method, state: FSMContext):
     data = await state.get_data()
-    return_product_id = data.get("rev_return_product_id")
-    return_city = data.get("rev_return_city") or data.get("city")
-    return_product = data.get("rev_return_product")
-    return_index = int(data.get("rev_return_index", 0) or 0)
 
     await state.update_data(
         rev_all_city_mode=False,
@@ -305,15 +301,6 @@ async def _restore_after_all_city_reviews(send_method, state: FSMContext):
         rev_return_product_id=None,
         rev_return_index=None,
     )
-
-    if return_city or return_product or return_product_id:
-        await state.update_data(
-            rev_search_city=return_city,
-            rev_search_product=return_product,
-            rev_search_product_id=return_product_id,
-        )
-        await _show_review_page(send_method, return_index, state)
-        return
 
     city_name = data.get("city")
     population = data.get("population", 0)
@@ -1267,8 +1254,6 @@ async def _show_review_page(send_method, index, state):
             ])
         elif all_city_mode:
             buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="rev_back_from_all")])
-        elif city_filter or product_filter:
-            buttons.append([InlineKeyboardButton(text="❌ Сброс фильтра", callback_data="rev_search_reset")])
         else:
             buttons.append([InlineKeyboardButton(text="🔍 Поиск по городу", callback_data="rev_search_start")])
         buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="nav_cancel")])
@@ -1317,14 +1302,11 @@ async def _show_review_page(send_method, index, state):
             "<code>/allrew</code> - все отзывы по городу",
         ])
     elif all_city_mode:
-        back_label = "к отзыву товара" if data.get('rev_return_product_id') else "к предыдущим отзывам"
         commands.extend([
-            f"<code>/назад</code> - {back_label}",
+            "<code>/назад</code> - назад к каталогу",
         ])
-    elif city_filter or product_filter:
-        commands.append("<code>/сброс</code> - убрать фильтр")
-        if city_filter:
-            commands.append("<code>/allrew</code> - все отзывы по городу")
+    elif city_filter:
+        commands.append("<code>/allrew</code> - все отзывы по городу")
     else:
         commands.append("<code>/поискотзывов Томск</code> - искать по городу")
     text += "\nКоманды: " + " | ".join(commands)
@@ -1472,15 +1454,6 @@ async def rev_search_process(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == 'rev_search_reset')
 async def rev_search_reset(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if data.get('rev_all_city_mode'):
-        await _safe_answer_callback(callback)
-        await _restore_after_all_city_reviews(
-            lambda text, reply_markup=None: _safe_edit_or_send(callback, text, reply_markup, state),
-            state,
-        )
-        return
-
     await state.update_data(
         rev_search_city=None,
         rev_search_product=None,
@@ -1544,12 +1517,6 @@ async def process_review_commands(message: Message, state: FSMContext):
         await _start_product_checkout(message.from_user.id, message, state, product_id)
         return
     if _matches_command(message.text, "сброс", "reset"):
-        if all_city_mode:
-            await _restore_after_all_city_reviews(
-                lambda text, reply_markup=None: _replace_menu_message(message, state, text, reply_markup),
-                state,
-            )
-            return
         await state.update_data(
             rev_search_city=None,
             rev_search_product=None,
