@@ -19,7 +19,37 @@ CATALOG_STASH_REGISTRY_DOC_KEY = "catalog_stash_registry"
 CATALOG_ALL_PRODUCTS_DOC_KEY = "catalog_all_products"
 DEFAULT_STASH_TYPES = ["Тайник", "Прикоп", "Магнит"]
 AUTO_PRODUCT_DISTRICT_MIN = 1
-AUTO_PRODUCT_DISTRICT_MAX = 5
+AUTO_PRODUCT_DISTRICT_MAX = 4
+AUTO_PRODUCT_STREET_MIN = 5
+AUTO_PRODUCT_STREET_MAX = 10
+STREET_LOCATION_PREFIXES = (
+    "ул. ",
+    "пр-т ",
+    "пер. ",
+    "пр-д ",
+    "бул. ",
+    "ш. ",
+    "наб. ",
+    "аллея ",
+)
+STREET_LOCATION_KEYWORDS = (
+    "улица",
+    "проспект",
+    "переулок",
+    "проезд",
+    "бульвар",
+    "шоссе",
+    "набережная",
+    "аллея",
+)
+DISTRICT_LOCATION_KEYWORDS = (
+    "район",
+    "мкр",
+    "микрорайон",
+    "квартал",
+    "округ",
+)
+GENERIC_LOCATION_NAMES = {"центр"}
 LEGACY_STASH_TYPE_ALIASES = {
     "тайник": "Тайник",
     "тайник-камень": "Тайник",
@@ -192,6 +222,50 @@ def _clean_district_values(values: list[str] | tuple[str, ...] | None) -> list[s
         if district and district not in cleaned:
             cleaned.append(district)
     return cleaned
+
+
+def _normalize_location_name(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _is_street_location(value: str | None) -> bool:
+    normalized = _normalize_location_name(value)
+    if not normalized or normalized in GENERIC_LOCATION_NAMES:
+        return False
+    if normalized.startswith(STREET_LOCATION_PREFIXES):
+        return True
+    return any(
+        normalized.startswith(keyword + " ") or normalized.endswith(" " + keyword)
+        for keyword in STREET_LOCATION_KEYWORDS
+    )
+
+
+def _is_district_location(value: str | None) -> bool:
+    normalized = _normalize_location_name(value)
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in DISTRICT_LOCATION_KEYWORDS)
+
+
+def _uses_street_distribution(values: list[str] | tuple[str, ...] | None) -> bool:
+    locations = _clean_district_values(values)
+    if not locations:
+        return False
+
+    street_count = sum(1 for item in locations if _is_street_location(item))
+    if street_count == 0:
+        return False
+
+    district_count = sum(1 for item in locations if _is_district_location(item))
+    meaningful_count = sum(1 for item in locations if _normalize_location_name(item) not in GENERIC_LOCATION_NAMES)
+    required_street_count = max(1, (meaningful_count + 1) // 2)
+    return street_count >= required_street_count and street_count > district_count
+
+
+def _get_auto_product_location_limits(values: list[str] | tuple[str, ...] | None) -> tuple[int, int, bool]:
+    if _uses_street_distribution(values):
+        return AUTO_PRODUCT_STREET_MIN, AUTO_PRODUCT_STREET_MAX, True
+    return AUTO_PRODUCT_DISTRICT_MIN, AUTO_PRODUCT_DISTRICT_MAX, False
 
 
 def _get_stash_pool() -> list[str]:
@@ -981,9 +1055,10 @@ class CatalogService:
 
         district_seed = _load_price_seed()
         rng = random.Random(f"districts::{_normalize_city_key(city_name)}::{product_id}::{district_seed}")
-        counts = list(range(min(AUTO_PRODUCT_DISTRICT_MIN, len(districts)), min(AUTO_PRODUCT_DISTRICT_MAX, len(districts)) + 1))
+        min_count, max_count, is_street_pool = _get_auto_product_location_limits(districts)
+        counts = list(range(min(min_count, len(districts)), min(max_count, len(districts)) + 1))
         count_weights = {1: 1, 2: 4, 3: 5, 4: 2, 5: 1}
-        weights = [count_weights.get(value, 1) for value in counts]
+        weights = [1] * len(counts) if is_street_pool else [count_weights.get(value, 1) for value in counts]
         count = rng.choices(counts, weights=weights, k=1)[0]
         sampled = set(rng.sample(districts, count))
         selected = [district for district in districts if district in sampled]
@@ -1014,8 +1089,9 @@ class CatalogService:
             selected = [district for district in selected if district in city_districts]
         if not selected:
             return []
-        if city_districts and len(city_districts) > AUTO_PRODUCT_DISTRICT_MAX:
-            if len(selected) > AUTO_PRODUCT_DISTRICT_MAX or len(selected) == len(city_districts):
+        _, max_count, _ = _get_auto_product_location_limits(city_districts)
+        if city_districts and len(city_districts) > max_count:
+            if len(selected) > max_count or len(selected) == len(city_districts):
                 return CatalogService._pick_auto_product_districts(city_name, product_id, city_districts)
         return selected
 

@@ -100,6 +100,74 @@ class CatalogDistrictLimitTests(unittest.TestCase):
 
         self.assertGreater(middle_count, edge_count)
 
+    def test_get_available_districts_for_street_pool_returns_five_to_ten(self) -> None:
+        streets = [
+            "ул. Ленина",
+            "ул. Гагарина",
+            "ул. Советская",
+            "ул. Кирова",
+            "пр-т Мира",
+            "пр-т Победы",
+            "пер. Лесной",
+            "бул. Молодежный",
+            "ш. Северное",
+            "ул. Весенняя",
+            "Центр",
+            "ул. Набережная",
+        ]
+
+        selected = CatalogService.get_available_districts_for_product("Томск", "p7", streets)
+
+        self.assertGreaterEqual(len(selected), 5)
+        self.assertLessEqual(len(selected), 10)
+        self.assertTrue(all(item in streets for item in selected))
+
+    def test_load_inventory_caps_full_city_street_pool_to_five_or_ten(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inventory_path = os.path.join(temp_dir, "products_inventory.json")
+            geo_cache_path = os.path.join(temp_dir, "districts_cache.json")
+
+            streets = [
+                "ул. Ленина",
+                "ул. Гагарина",
+                "ул. Советская",
+                "ул. Кирова",
+                "пр-т Мира",
+                "пр-т Победы",
+                "пер. Лесной",
+                "бул. Молодежный",
+                "ш. Северное",
+                "ул. Весенняя",
+                "Центр",
+                "ул. Набережная",
+            ]
+
+            with open(geo_cache_path, "w", encoding="utf-8") as file_obj:
+                json.dump({"томск": streets}, file_obj, ensure_ascii=False)
+            with open(inventory_path, "w", encoding="utf-8") as file_obj:
+                json.dump({"томск": {"p4": streets}}, file_obj, ensure_ascii=False)
+
+            original_inventory = CatalogService.INVENTORY_FILE
+            original_geo_cache = geo_module.CACHE_FILE
+
+            try:
+                CatalogService.INVENTORY_FILE = inventory_path
+                geo_module.CACHE_FILE = geo_cache_path
+
+                data = CatalogService._load_inventory()
+                selected = data["томск"]["p4"]
+
+                self.assertGreaterEqual(len(selected), 5)
+                self.assertLessEqual(len(selected), 10)
+                self.assertLess(len(selected), len(streets))
+
+                with open(inventory_path, "r", encoding="utf-8") as file_obj:
+                    saved = json.load(file_obj)
+                self.assertEqual(saved["томск"]["p4"], selected)
+            finally:
+                CatalogService.INVENTORY_FILE = original_inventory
+                geo_module.CACHE_FILE = original_geo_cache
+
     def test_clear_cache_removes_product_inventory_and_cache(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             inventory_path = os.path.join(temp_dir, "products_inventory.json")
