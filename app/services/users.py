@@ -6,8 +6,18 @@ from app.services.postgres_store import PostgresDocumentStore
 
 USERS_FILE = "storage/users_db.json"
 USERS_DOC_KEY = "users_db"
+ACTIVE_ORDERS_FILE = "storage/active_orders.json"
+ACTIVE_ORDERS_DOC_KEY = "active_orders"
 
 class UserService:
+    @staticmethod
+    def _is_legacy_card_rf_order(order_data: dict | None) -> bool:
+        return bool(
+            isinstance(order_data, dict)
+            and order_data.get("type") == "card_rf"
+            and not order_data.get("payment_request_id")
+        )
+
     @staticmethod
     def _load_db():
         if PostgresDocumentStore.is_enabled():
@@ -35,6 +45,68 @@ class UserService:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"Error saving users db: {e}")
+
+    @staticmethod
+    def _load_active_orders_db():
+        if PostgresDocumentStore.is_enabled():
+            data = PostgresDocumentStore.get_document(ACTIVE_ORDERS_DOC_KEY, {"orders": {}})
+            if not isinstance(data, dict):
+                return {"orders": {}}
+            if not isinstance(data.get("orders"), dict):
+                data["orders"] = {}
+            return data
+        if not os.path.exists(ACTIVE_ORDERS_FILE):
+            return {"orders": {}}
+        try:
+            with open(ACTIVE_ORDERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    return {"orders": {}}
+                if not isinstance(data.get("orders"), dict):
+                    data["orders"] = {}
+                return data
+        except:
+            return {"orders": {}}
+
+    @staticmethod
+    def _save_active_orders_db(data):
+        if PostgresDocumentStore.is_enabled():
+            PostgresDocumentStore.set_document(ACTIVE_ORDERS_DOC_KEY, data)
+            return
+        try:
+            with open(ACTIVE_ORDERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"Error saving active orders db: {e}")
+
+    @staticmethod
+    def _migrate_legacy_active_orders():
+        users_data = UserService._load_db()
+        if not isinstance(users_data, dict):
+            return
+
+        users = users_data.get("users")
+        if not isinstance(users, dict):
+            return
+
+        active_orders_data = UserService._load_active_orders_db()
+        orders = active_orders_data.get("orders", {})
+        changed = False
+
+        for user_id, user_data in users.items():
+            if not isinstance(user_data, dict):
+                continue
+            legacy_order = user_data.pop("active_order", None)
+            if legacy_order and user_id not in orders:
+                orders[user_id] = legacy_order
+                changed = True
+            elif legacy_order is not None:
+                changed = True
+
+        if changed:
+            active_orders_data["orders"] = orders
+            UserService._save_db(users_data)
+            UserService._save_active_orders_db(active_orders_data)
 
     @staticmethod
     def add_user(user_id: int, username: str, referrer_id: str = None):
@@ -177,40 +249,50 @@ class UserService:
 
     @staticmethod
     def set_active_order(user_id: int, order_data: dict):
-        data = UserService._load_db()
         str_id = str(user_id)
-        if str_id in data["users"]:
-            data["users"][str_id]["active_order"] = order_data
-            UserService._save_db(data)
+        active_orders_data = UserService._load_active_orders_db()
+        active_orders_data["orders"][str_id] = order_data
+        UserService._save_active_orders_db(active_orders_data)
 
     @staticmethod
     def get_active_order(user_id: int):
-        data = UserService._load_db()
         str_id = str(user_id)
-        if str_id in data["users"]:
-            return data["users"][str_id].get("active_order")
-        return None
+        UserService._migrate_legacy_active_orders()
+        active_orders_data = UserService._load_active_orders_db()
+        order_data = active_orders_data.get("orders", {}).get(str_id)
+        if UserService._is_legacy_card_rf_order(order_data):
+            del active_orders_data["orders"][str_id]
+            UserService._save_active_orders_db(active_orders_data)
+            return None
+        return order_data
 
     @staticmethod
     def get_all_active_orders():
-        data = UserService._load_db()
+        UserService._migrate_legacy_active_orders()
+        active_orders_data = UserService._load_active_orders_db()
         orders = []
-        for uid, udata in data.get("users", {}).items():
-            if "active_order" in udata and udata["active_order"]:
-                orders.append({
-                    "user_id": uid,
-                    "username": udata.get("username"),
-                    "order": udata["active_order"]
-                })
+        for uid, order_data in list(active_orders_data.get("orders", {}).items()):
+            if UserService._is_legacy_card_rf_order(order_data):
+                del active_orders_data["orders"][uid]
+                continue
+            user = UserService.get_user(int(uid))
+            orders.append({
+                "user_id": uid,
+                "username": user.get("username") if user else None,
+                "order": order_data
+            })
+        if len(active_orders_data.get("orders", {})) != len(orders):
+            UserService._save_active_orders_db(active_orders_data)
         return orders
 
     @staticmethod
     def remove_active_order(user_id: int):
-        data = UserService._load_db()
         str_id = str(user_id)
-        if str_id in data["users"] and "active_order" in data["users"][str_id]:
-            del data["users"][str_id]["active_order"]
-            UserService._save_db(data)
+        UserService._migrate_legacy_active_orders()
+        active_orders_data = UserService._load_active_orders_db()
+        if str_id in active_orders_data.get("orders", {}):
+            del active_orders_data["orders"][str_id]
+            UserService._save_active_orders_db(active_orders_data)
 
     @staticmethod
     def increment_cancel_count(user_id: int):
