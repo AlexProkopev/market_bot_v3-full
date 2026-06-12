@@ -19,37 +19,9 @@ CATALOG_STASH_REGISTRY_DOC_KEY = "catalog_stash_registry"
 CATALOG_ALL_PRODUCTS_DOC_KEY = "catalog_all_products"
 DEFAULT_STASH_TYPES = ["Тайник", "Прикоп", "Магнит"]
 AUTO_PRODUCT_DISTRICT_MIN = 1
-AUTO_PRODUCT_DISTRICT_MAX = 4
-AUTO_PRODUCT_STREET_MIN = 5
-AUTO_PRODUCT_STREET_MAX = 10
-STREET_LOCATION_PREFIXES = (
-    "ул. ",
-    "пр-т ",
-    "пер. ",
-    "пр-д ",
-    "бул. ",
-    "ш. ",
-    "наб. ",
-    "аллея ",
-)
-STREET_LOCATION_KEYWORDS = (
-    "улица",
-    "проспект",
-    "переулок",
-    "проезд",
-    "бульвар",
-    "шоссе",
-    "набережная",
-    "аллея",
-)
-DISTRICT_LOCATION_KEYWORDS = (
-    "район",
-    "мкр",
-    "микрорайон",
-    "квартал",
-    "округ",
-)
-GENERIC_LOCATION_NAMES = {"центр"}
+AUTO_PRODUCT_DISTRICT_MAX = 5
+AUTO_PRODUCT_STREET_MIN = 1
+AUTO_PRODUCT_STREET_MAX = 4
 LEGACY_STASH_TYPE_ALIASES = {
     "тайник": "Тайник",
     "тайник-камень": "Тайник",
@@ -224,48 +196,70 @@ def _clean_district_values(values: list[str] | tuple[str, ...] | None) -> list[s
     return cleaned
 
 
-def _normalize_location_name(value: str | None) -> str:
-    return " ".join((value or "").strip().lower().split())
-
-
-def _is_street_location(value: str | None) -> bool:
-    normalized = _normalize_location_name(value)
-    if not normalized or normalized in GENERIC_LOCATION_NAMES:
+def _looks_like_street_name(value: str) -> bool:
+    lowered = " ".join((value or "").strip().lower().split())
+    if not lowered:
         return False
-    if normalized.startswith(STREET_LOCATION_PREFIXES):
-        return True
-    return any(
-        normalized.startswith(keyword + " ") or normalized.endswith(" " + keyword)
-        for keyword in STREET_LOCATION_KEYWORDS
+
+    if any(token in lowered for token in ["район", "мкр", "микрорайон", "квартал", "жилмассив", "поселок", "посёлок"]):
+        return False
+
+    street_prefixes = (
+        "ул. ",
+        "улица ",
+        "пр-т ",
+        "проспект ",
+        "пер. ",
+        "переулок ",
+        "пр-д ",
+        "проезд ",
+        "бул. ",
+        "бульвар ",
+        "ш. ",
+        "шоссе ",
+        "наб. ",
+        "набережная ",
+        "аллея ",
     )
+    return lowered.startswith(street_prefixes)
 
 
-def _is_district_location(value: str | None) -> bool:
-    normalized = _normalize_location_name(value)
-    if not normalized:
-        return False
-    return any(keyword in normalized for keyword in DISTRICT_LOCATION_KEYWORDS)
+def _is_central_placeholder(value: str) -> bool:
+    lowered = " ".join((value or "").strip().lower().split())
+    return lowered in {"центр", "центр города", "городской центр"}
 
 
-def _uses_street_distribution(values: list[str] | tuple[str, ...] | None) -> bool:
-    locations = _clean_district_values(values)
-    if not locations:
-        return False
-
-    street_count = sum(1 for item in locations if _is_street_location(item))
-    if street_count == 0:
-        return False
-
-    district_count = sum(1 for item in locations if _is_district_location(item))
-    meaningful_count = sum(1 for item in locations if _normalize_location_name(item) not in GENERIC_LOCATION_NAMES)
-    required_street_count = max(1, (meaningful_count + 1) // 2)
-    return street_count >= required_street_count and street_count > district_count
+def _split_district_pool(values: list[str] | tuple[str, ...] | None) -> tuple[list[str], list[str]]:
+    areas = []
+    streets = []
+    for item in _clean_district_values(values):
+        if _looks_like_street_name(item):
+            streets.append(item)
+        else:
+            areas.append(item)
+    return areas, streets
 
 
-def _get_auto_product_location_limits(values: list[str] | tuple[str, ...] | None) -> tuple[int, int, bool]:
-    if _uses_street_distribution(values):
-        return AUTO_PRODUCT_STREET_MIN, AUTO_PRODUCT_STREET_MAX, True
-    return AUTO_PRODUCT_DISTRICT_MIN, AUTO_PRODUCT_DISTRICT_MAX, False
+def _pick_weighted_count(
+    rng: random.Random,
+    available_count: int,
+    minimum: int,
+    maximum: int,
+    count_weights: dict[int, int],
+) -> int:
+    if available_count <= 0:
+        return 0
+
+    lower = min(minimum, available_count)
+    upper = min(maximum, available_count)
+    if upper <= 0:
+        return 0
+    if lower > upper:
+        lower = upper
+
+    counts = list(range(lower, upper + 1))
+    weights = [count_weights.get(value, 1) for value in counts]
+    return rng.choices(counts, weights=weights, k=1)[0]
 
 
 def _get_stash_pool() -> list[str]:
@@ -1040,12 +1034,27 @@ class CatalogService:
             return []
 
     @staticmethod
+    def _uses_street_distribution(districts: list[str] | None) -> bool:
+        area_items, street_items = _split_district_pool(districts)
+        if not street_items:
+            return False
+        non_central_areas = [item for item in area_items if not _is_central_placeholder(item)]
+        return not non_central_areas
+
+    @staticmethod
+    def _get_auto_product_count_bounds(districts: list[str] | None) -> tuple[int, int]:
+        if CatalogService._uses_street_distribution(districts):
+            return AUTO_PRODUCT_STREET_MIN, AUTO_PRODUCT_STREET_MAX
+        return AUTO_PRODUCT_DISTRICT_MIN, AUTO_PRODUCT_DISTRICT_MAX
+
+    @staticmethod
     def _pick_auto_product_districts(
         city_name: str,
         product_id: str,
         all_districts: list[str] | None = None,
         previous_selection: list[str] | None = None,
         force_change: bool = False,
+        seed_suffix: str = "",
     ) -> list[str]:
         districts = _clean_district_values(all_districts or CatalogService._get_city_district_pool(city_name))
         if not districts:
@@ -1054,23 +1063,57 @@ class CatalogService:
             return districts
 
         district_seed = _load_price_seed()
-        rng = random.Random(f"districts::{_normalize_city_key(city_name)}::{product_id}::{district_seed}")
-        min_count, max_count, is_street_pool = _get_auto_product_location_limits(districts)
-        counts = list(range(min(min_count, len(districts)), min(max_count, len(districts)) + 1))
-        count_weights = {1: 1, 2: 4, 3: 5, 4: 2, 5: 1}
-        weights = [1] * len(counts) if is_street_pool else [count_weights.get(value, 1) for value in counts]
-        count = rng.choices(counts, weights=weights, k=1)[0]
-        sampled = set(rng.sample(districts, count))
-        selected = [district for district in districts if district in sampled]
+        rng = random.Random(f"districts::{_normalize_city_key(city_name)}::{product_id}::{district_seed}::{seed_suffix}")
+        area_items, street_items = _split_district_pool(districts)
+
+        if street_items and not [item for item in area_items if not _is_central_placeholder(item)]:
+            area_items = []
+
+        district_weights = {1: 3, 2: 6, 3: 6, 4: 2, 5: 1}
+        street_weights = {1: 5, 2: 4, 3: 2, 4: 1}
+
+        selected = []
+        if area_items:
+            area_count = _pick_weighted_count(
+                rng,
+                len(area_items),
+                AUTO_PRODUCT_DISTRICT_MIN,
+                AUTO_PRODUCT_DISTRICT_MAX,
+                district_weights,
+            )
+            sampled_areas = set(rng.sample(area_items, area_count)) if area_count else set()
+            selected.extend([district for district in districts if district in sampled_areas])
+
+        if street_items:
+            street_count = _pick_weighted_count(
+                rng,
+                len(street_items),
+                AUTO_PRODUCT_STREET_MIN,
+                AUTO_PRODUCT_STREET_MAX,
+                street_weights,
+            )
+            sampled_streets = set(rng.sample(street_items, street_count)) if street_count else set()
+            selected.extend([district for district in districts if district in sampled_streets])
+
+        if not selected:
+            source = area_items or street_items
+            if source:
+                selected = [rng.choice(source)]
 
         previous = [district for district in _clean_district_values(previous_selection) if district in districts]
-        if force_change and previous and selected == previous and len(districts) > count:
+        if force_change and previous and selected == previous and len(districts) > len(selected):
             for attempt in range(1, len(districts) + 1):
                 alt_rng = random.Random(
                     f"districts::{_normalize_city_key(city_name)}::{product_id}::{district_seed}::{attempt}"
                 )
-                alt_sampled = set(alt_rng.sample(districts, count))
-                alternative = [district for district in districts if district in alt_sampled]
+                alternative = CatalogService._pick_auto_product_districts(
+                    city_name,
+                    product_id,
+                    districts,
+                    previous_selection=None,
+                    force_change=False,
+                    seed_suffix=str(attempt),
+                )
                 if alternative != previous:
                     return alternative
 
@@ -1089,10 +1132,11 @@ class CatalogService:
             selected = [district for district in selected if district in city_districts]
         if not selected:
             return []
-        _, max_count, _ = _get_auto_product_location_limits(city_districts)
-        if city_districts and len(city_districts) > max_count:
-            if len(selected) > max_count or len(selected) == len(city_districts):
-                return CatalogService._pick_auto_product_districts(city_name, product_id, city_districts)
+        if city_districts:
+            _, max_count = CatalogService._get_auto_product_count_bounds(city_districts)
+            if len(city_districts) > max_count:
+                if len(selected) > max_count or len(selected) == len(city_districts):
+                    return CatalogService._pick_auto_product_districts(city_name, product_id, city_districts)
         return selected
 
     @staticmethod
