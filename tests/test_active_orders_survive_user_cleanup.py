@@ -70,3 +70,45 @@ def test_legacy_card_rf_order_without_request_id_is_cleared(tmp_path, monkeypatc
 
     assert UserService.get_active_order(1002) is None
     assert _read_json(active_orders_file)["orders"] == {}
+
+
+def test_increment_cancel_count_recreates_missing_user(tmp_path, monkeypatch):
+    users_file = tmp_path / "users_db.json"
+    active_orders_file = tmp_path / "active_orders.json"
+
+    monkeypatch.setattr(users_module, "USERS_FILE", str(users_file))
+    monkeypatch.setattr(users_module, "ACTIVE_ORDERS_FILE", str(active_orders_file))
+
+    UserService.add_user(2001, "cancel_tester")
+    users_data = _read_json(users_file)
+    del users_data["users"]["2001"]
+    _write_json(users_file, users_data)
+
+    current = UserService.increment_cancel_count(2001)
+
+    assert current == 1
+    restored = UserService.get_user(2001)
+    assert restored is not None
+    assert restored.get("cancel_count") == 1
+
+
+def test_clear_users_db_keeps_admin_and_active_orders(tmp_path, monkeypatch):
+    users_file = tmp_path / "users_db.json"
+    active_orders_file = tmp_path / "active_orders.json"
+
+    monkeypatch.setattr(users_module, "USERS_FILE", str(users_file))
+    monkeypatch.setattr(users_module, "ACTIVE_ORDERS_FILE", str(active_orders_file))
+
+    UserService.add_user(1, "admin")
+    UserService.add_user(2, "user2")
+    UserService.add_user(3, "user3")
+    UserService.set_active_order(2, {"type": "card_rf", "payment_request_id": "req-2"})
+
+    result = UserService.clear_users_db(preserve_user_ids=[1])
+
+    assert result == {"removed": 2, "kept": 1}
+    users_data = _read_json(users_file)
+    assert set(users_data["users"].keys()) == {"1"}
+
+    active_orders_data = _read_json(active_orders_file)
+    assert active_orders_data["orders"].get("2", {}).get("payment_request_id") == "req-2"

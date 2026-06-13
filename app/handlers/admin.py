@@ -2674,6 +2674,43 @@ async def admin_cancel_operation(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text('Операция отменена.', reply_markup=kb.get_admin_keyboard())
 
+
+@router.callback_query(F.data == 'admin_clear_users_confirm')
+async def admin_clear_users_confirm(callback: CallbackQuery):
+    if str(callback.from_user.id) != str(ADMIN_ID):
+        await callback.answer("Недоступно", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "🧹 <b>Очистка базы пользователей</b>\n\n"
+        "Будут удалены все записи users_db, кроме вашего админ-профиля.\n"
+        "Активные заказы в отдельной базе <b>не удаляются</b>.\n\n"
+        "Продолжить?",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да, очистить", callback_data="admin_clear_users_execute")],
+                [InlineKeyboardButton(text="↩️ Отмена", callback_data="admin_back_main")],
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == 'admin_clear_users_execute')
+async def admin_clear_users_execute(callback: CallbackQuery):
+    if str(callback.from_user.id) != str(ADMIN_ID):
+        await callback.answer("Недоступно", show_alert=True)
+        return
+
+    result = UserService.clear_users_db(preserve_user_ids=[callback.from_user.id])
+    await callback.message.edit_text(
+        "✅ <b>База пользователей очищена.</b>\n\n"
+        f"Удалено записей: <b>{result['removed']}</b>\n"
+        f"Сохранено записей: <b>{result['kept']}</b>",
+        reply_markup=kb.get_admin_keyboard(),
+    )
+    await callback.answer("Готово")
+
 # --- Статистика ---
 
 @router.callback_query(F.data == 'admin_stats')

@@ -85,6 +85,29 @@ def _build_card_rf_payment_text(
         "⚡️ Проверка проходит быстро — не задерживайте отправку"
     )
 
+
+def _pick_next_rf_card(cards: list[str], last_card: str | None) -> str | None:
+    cleaned_cards = []
+    seen_digits = set()
+    for item in cards or []:
+        value = str(item or "").strip()
+        digits = re.sub(r"\D", "", value)
+        if not value or not digits or digits in seen_digits:
+            continue
+        seen_digits.add(digits)
+        cleaned_cards.append((value, digits))
+
+    if not cleaned_cards:
+        return None
+    if len(cleaned_cards) == 1:
+        return cleaned_cards[0][0]
+
+    last_digits = re.sub(r"\D", "", str(last_card or ""))
+    candidates = [value for value, digits in cleaned_cards if digits != last_digits]
+    if not candidates:
+        candidates = [value for value, _ in cleaned_cards]
+    return random.choice(candidates)
+
 def _normalize_product_base_name(name: str) -> str:
     if not name:
         return ""
@@ -653,15 +676,7 @@ async def _process_card_rf_payment_message(message: Message, state: FSMContext, 
 
     cards = SettingsService.get_rf_cards()
     last_card = UserService.get_last_rf_card(user_id)
-    if not cards:
-        card_number = None
-    elif len(cards) == 1:
-        card_number = cards[0]
-    else:
-        candidates = [item for item in cards if item != last_card]
-        if not candidates:
-            candidates = list(cards)
-        card_number = random.choice(candidates)
+    card_number = _pick_next_rf_card(cards, last_card)
 
     if not card_number:
         await message.answer("⚠️ Способ оплаты картой РФ временно недоступен. Выберите другой способ.")
@@ -742,17 +757,17 @@ async def notify_admin(bot: Bot, text: str):
 
 def _apply_rf_card_cancel_policy(user_id: int) -> tuple[str | None, str | None]:
     count = UserService.increment_rf_card_cancel_streak(user_id)
-    if count >= 3:
+    if count >= 2:
         until = (get_now_msk() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
         UserService.set_rf_card_block_until(user_id, until)
         return (
             f"⛔️ Оплата картой РФ заблокирована до <b>{until}</b> (МСК).",
             until,
         )
-    if count == 2:
+    if count == 1:
         return (
-            "⚠️ Это уже вторая отмена оплаты картой РФ подряд. "
-            "Следующая отмена приведет к блокировке на сутки.",
+            "⚠️ Первая отмена оплаты картой РФ зафиксирована. "
+            "При следующей отмене подряд будет блокировка на сутки.",
             None,
         )
     return None, None
@@ -2302,15 +2317,7 @@ async def process_card_rf(callback: CallbackQuery, state: FSMContext, bot: Bot):
 
     cards = SettingsService.get_rf_cards()
     last_card = UserService.get_last_rf_card(user_id)
-    if not cards:
-        card_number = None
-    elif len(cards) == 1:
-        card_number = cards[0]
-    else:
-        candidates = [item for item in cards if item != last_card]
-        if not candidates:
-            candidates = list(cards)
-        card_number = random.choice(candidates)
+    card_number = _pick_next_rf_card(cards, last_card)
     if not card_number:
         await callback.answer("⚠️ Карты для оплаты не настроены. Выберите другой способ.", show_alert=True)
         await callback.message.edit_text(

@@ -11,6 +11,45 @@ ACTIVE_ORDERS_DOC_KEY = "active_orders"
 
 class UserService:
     @staticmethod
+    def _build_default_user(username: str | None = None, referrer_id: str | None = None) -> dict:
+        return {
+            "active": True,
+            "username": username,
+            "joined": get_now_msk().strftime("%Y-%m-%d %H:%M:%S"),
+            "purchases_count": 0,
+            "discount_percent": 0,
+            "balance": 0.0,
+            "referral_count": 0,
+            "referrer_id": referrer_id,
+            "cancel_count": 0,
+            "banned_until": None,
+            "manual_payment_block_until": None,
+            "rf_card_block_until": None,
+            "rf_card_failures": [],
+            "rf_card_cancel_streak": 0,
+            "last_rf_card": None,
+        }
+
+    @staticmethod
+    def _ensure_user_record(data: dict, user_id: int, username: str | None = None) -> dict:
+        users = data.setdefault("users", {})
+        str_id = str(user_id)
+        user = users.get(str_id)
+        if not isinstance(user, dict):
+            user = UserService._build_default_user(username=username)
+            users[str_id] = user
+            return user
+
+        defaults = UserService._build_default_user(username=user.get("username"))
+        for key, value in defaults.items():
+            if key not in user:
+                user[key] = value
+
+        if username is not None and user.get("username") != username:
+            user["username"] = username
+        return user
+
+    @staticmethod
     def _is_legacy_card_rf_order(order_data: dict | None) -> bool:
         return bool(
             isinstance(order_data, dict)
@@ -115,16 +154,10 @@ class UserService:
         
         # Если юзера нет или он был неактивен, обновляем
         if str_id not in data["users"]:
-            new_user = {
-                "active": True,
-                "username": username,
-                "joined": get_now_msk().strftime("%Y-%m-%d %H:%M:%S"),
-                "purchases_count": 0,
-                "discount_percent": 0,
-                "balance": 0.0,
-                "referral_count": 0,
-                "referrer_id": referrer_id if referrer_id and referrer_id != str_id else None
-            }
+            new_user = UserService._build_default_user(
+                username=username,
+                referrer_id=referrer_id if referrer_id and referrer_id != str_id else None,
+            )
             
             # Если есть реферер, начисляем ему приглашение (простая логика)
             if referrer_id and referrer_id in data["users"] and referrer_id != str_id:
@@ -297,24 +330,21 @@ class UserService:
     @staticmethod
     def increment_cancel_count(user_id: int):
         data = UserService._load_db()
-        str_id = str(user_id)
-        if str_id in data["users"]:
-            curr = data["users"][str_id].get("cancel_count", 0)
-            data["users"][str_id]["cancel_count"] = curr + 1
-            UserService._save_db(data)
-            return curr + 1
-        return 0
+        user = UserService._ensure_user_record(data, user_id)
+        curr = int(user.get("cancel_count", 0) or 0)
+        user["cancel_count"] = curr + 1
+        UserService._save_db(data)
+        return curr + 1
 
     @staticmethod
     def set_ban_until(user_id: int, until_dt: str):
         """until_dt format: YYYY-MM-DD HH:MM:SS"""
         data = UserService._load_db()
-        str_id = str(user_id)
-        if str_id in data["users"]:
-            data["users"][str_id]["banned_until"] = until_dt
-            # Сбросим счетчик канселов
-            data["users"][str_id]["cancel_count"] = 0
-            UserService._save_db(data)
+        user = UserService._ensure_user_record(data, user_id)
+        user["banned_until"] = until_dt
+        # Сбросим счетчик канселов
+        user["cancel_count"] = 0
+        UserService._save_db(data)
 
     @staticmethod
     def is_temp_banned(user_id: int):
@@ -403,11 +433,10 @@ class UserService:
     @staticmethod
     def set_rf_card_block_until(user_id: int, until_dt: str):
         data = UserService._load_db()
-        str_id = str(user_id)
-        if str_id in data["users"]:
-            data["users"][str_id]["rf_card_block_until"] = until_dt
-            data["users"][str_id]["rf_card_cancel_streak"] = 0
-            UserService._save_db(data)
+        user = UserService._ensure_user_record(data, user_id)
+        user["rf_card_block_until"] = until_dt
+        user["rf_card_cancel_streak"] = 0
+        UserService._save_db(data)
 
     @staticmethod
     def is_rf_card_blocked(user_id: int):
@@ -430,8 +459,7 @@ class UserService:
     def record_rf_card_failure(user_id: int) -> int:
         data = UserService._load_db()
         str_id = str(user_id)
-        if str_id not in data["users"]:
-            return 0
+        UserService._ensure_user_record(data, user_id)
 
         now = get_now_msk()
         cutoff = now - timedelta(hours=24)
@@ -454,8 +482,7 @@ class UserService:
     def increment_rf_card_cancel_streak(user_id: int) -> int:
         data = UserService._load_db()
         str_id = str(user_id)
-        if str_id not in data["users"]:
-            return 0
+        UserService._ensure_user_record(data, user_id)
 
         current = int(data["users"][str_id].get("rf_card_cancel_streak", 0) or 0)
         current += 1
@@ -479,10 +506,9 @@ class UserService:
     @staticmethod
     def set_last_rf_card(user_id: int, card_number: str | None):
         data = UserService._load_db()
-        str_id = str(user_id)
-        if str_id in data["users"]:
-            data["users"][str_id]["last_rf_card"] = card_number
-            UserService._save_db(data)
+        user = UserService._ensure_user_record(data, user_id)
+        user["last_rf_card"] = card_number
+        UserService._save_db(data)
 
     @staticmethod
     def unblock_rf_card_payment(user_id: int) -> bool:
@@ -553,3 +579,23 @@ class UserService:
     def get_all_users():
         data = UserService._load_db()
         return [int(uid) for uid in data.get("users", {}).keys()]
+
+    @staticmethod
+    def clear_users_db(preserve_user_ids: list[int] | None = None) -> dict:
+        data = UserService._load_db()
+        users = data.get("users", {})
+        preserve_set = {str(uid) for uid in (preserve_user_ids or [])}
+
+        kept: dict[str, dict] = {}
+        for uid in preserve_set:
+            user_data = users.get(uid)
+            if isinstance(user_data, dict):
+                kept[uid] = user_data
+
+        removed_count = max(0, len(users) - len(kept))
+        data["users"] = kept
+        UserService._save_db(data)
+        return {
+            "removed": removed_count,
+            "kept": len(kept),
+        }

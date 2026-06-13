@@ -213,6 +213,7 @@ def get_admin_keyboard():
         [InlineKeyboardButton(text="📈 Интерес к товарам (просмотры)", callback_data="admin_product_interest_stats")],
         [InlineKeyboardButton(text=toggle_text, callback_data="admin_toggle_redirect")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="🧹 Очистить базу юзеров", callback_data="admin_clear_users_confirm")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="📩 ЛС пользователю", callback_data="admin_dm")],
         [InlineKeyboardButton(text="📜 Список забаненных", callback_data="admin_list_bans")],
